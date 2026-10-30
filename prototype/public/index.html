@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>DailyMapLine · 로컬 시제품</title>
+  <link rel="stylesheet" href="/maplibre-gl.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header><a class="brand" href="/">DailyMapLine<span>길을 남기는 하루</span></a><span class="badge">LOCAL PROTOTYPE</span></header>
+  <main>
+    <section class="intro"><p class="eyebrow">방문 지도와 이동 영상</p><h1>지나온 길을<br>하루의 영상으로.</h1><p>서울 시청 주변의 공개 지도와 시험 노드로<br>기기 안에서 경로를 연결하고 영상을 만듭니다.</p></section>
+    <section class="workspace" aria-label="시제품 작업 화면">
+      <div class="map-panel"><div class="panel-top"><h2>방문 지도</h2><label class="switch"><input id="fog-toggle" type="checkbox" checked>방문하지 않은 곳 덮기</label></div><div id="map" aria-label="서울 시청 주변 방문 지도"></div><div class="map-note"><span class="dot"></span>브랜치 양옆 50m가 드러납니다</div></div>
+      <aside>
+        <p class="eyebrow">시험 기록</p><h2>2026.10.31 <span>서울</span></h2>
+        <p class="muted">실제 개인의 이동 기록을 사용하지 않습니다.</p>
+        <div class="stats"><div><strong id="node-count">—</strong><span>기록 노드</span></div><div><strong id="route-length">—</strong><span>브랜치 거리</span></div><div><strong id="video-length">—</strong><span>영상 길이</span></div></div>
+        <button id="record" disabled>시험 노드로 브랜치 만들기</button>
+        <p id="status" role="status" aria-live="polite">로컬 지도 데이터를 읽고 있습니다.</p>
+        <hr><div class="video-heading"><h3>하루의 영상</h3><span>9:16 · 1km당 1초 · 5배속</span></div>
+        <button id="generate" class="primary" disabled>기기에서 영상 만들기</button>
+        <progress id="progress" value="0" max="1" hidden aria-label="영상 생성 진행률"></progress>
+        <p id="video-status" role="status" aria-live="polite">브랜치를 만든 뒤 영상을 생성할 수 있습니다.</p>
+        <video id="result" controls playsinline hidden aria-label="생성된 이동 영상"></video>
+        <a id="download" class="download" hidden>영상 저장</a>
+        <button id="export-record" class="subtle" disabled>시험 기록 JSON 저장</button>
+        <details><summary>검증 범위와 한계</summary><p>실행 중 데이터와 라이브러리는 모두 이 컴퓨터에서 읽습니다. 브랜치는 공개 길 데이터를 연결한 추정 경로입니다. 이 시제품은 통행 방향·이동 수단·실제 이동 복원, 모바일 백그라운드 기록을 검증하지 않습니다.</p><p>영상은 브라우저가 지원하는 MP4 또는 WebM으로 저장합니다. 1.5cm 축척 막대는 화면 폭 360 CSS px를 기준으로 계산했으며 실제 기기의 물리 길이를 보장하지 않습니다.</p></details>
+      </aside>
+    </section>
+    <footer>지도 데이터 © OpenStreetMap contributors · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">ODbL 및 출처</a> · <a href="/THIRD-PARTY-NOTICES.txt">라이선스</a><span>작은 시험 지역만 포함합니다.</span></footer>
+  </main>
+  <div id="render-host" aria-hidden="true"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

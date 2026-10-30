@@ -1,0 +1,8 @@
+node_modules/
+public/app.js
+public/app.css
+public/maplibre-gl.css
+public/maplibre-gl-worker.mjs
+public/maplibre-gl-shared.mjs
+outputs/
+data/source.osm

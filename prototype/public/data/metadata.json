@@ -1,0 +1,15 @@
+{
+  "source": "https://api.openstreetmap.org/api/0.6/map?bbox=126.9735,37.563,126.986,37.574",
+  "sourceName": "OpenStreetMap contributors",
+  "license": "ODbL-1.0",
+  "licenseUrl": "https://www.openstreetmap.org/copyright",
+  "bbox": [
+    126.9735,
+    37.563,
+    126.986,
+    37.574
+  ],
+  "downloadedAt": "2026-10-30T23:09:52.742587+00:00",
+  "sourceSha256": "a6cb0d896c2c18b625c695633cfac381729b2af4fe1f995bb182bfdae93c9e46",
+  "note": "공개 장소의 소규모 시험 데이터. 도로 방향·이동수단·통행 가능성 판단은 구현하지 않음. 노드 기록은 별도의 합성 입력."
+}
