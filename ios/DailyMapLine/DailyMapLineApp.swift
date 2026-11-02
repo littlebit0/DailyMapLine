@@ -59,11 +59,21 @@ private struct StatusBanner: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(model.status.text)
             if model.hasUnconnected { Text("일부 구간의 길을 연결하지 못했어요. 노드는 보관했어요.") }
+            if model.isWhenInUseOnly { AlwaysPermissionNotice() }
         }
         .font(.footnote)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(.regularMaterial)
+    }
+}
+
+private struct AlwaysPermissionNotice: View {
+    var body: some View {
+        Text("앱을 완전히 닫으면 기록이 멈출 수 있어요. 위치 권한을 '항상'으로 바꿔 주세요.")
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            Link("설정 앱에서 권한 열기", destination: url)
+        }
     }
 }
 
@@ -101,6 +111,7 @@ struct SettingsScreen: View {
                 if model.status == .denied, let url = URL(string: UIApplication.openSettingsURLString) {
                     Link("설정 앱에서 권한 열기", destination: url)
                 }
+                if model.isWhenInUseOnly { AlwaysPermissionNotice().font(.footnote) }
             }
         }
         .navigationTitle("설정")

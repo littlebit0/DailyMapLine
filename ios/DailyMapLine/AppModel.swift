@@ -3,11 +3,12 @@ import DailyMapLineCore
 import Foundation
 
 enum RecordingStatus {
-    case off, denied, moving, stopped, noSignal
+    case off, waitingPermission, denied, moving, stopped, noSignal
 
     var text: String {
         switch self {
         case .off: "위치 기록이 꺼져 있어요."
+        case .waitingPermission: "위치 권한을 허용하면 기록을 시작해요."
         case .denied: "위치 권한을 확인해 주세요. 기존 기록은 볼 수 있어요."
         case .moving: "이동을 기록하고 있어요."
         case .stopped: "머무는 동안 노드 기록을 쉬고 있어요."
@@ -22,6 +23,8 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published private(set) var branches: [Branch] = []
     @Published private(set) var dates: Set<String> = []
     @Published private(set) var hasUnconnected = false
+    /// Only "Always" lets iOS relaunch the app for recording after it is fully closed.
+    @Published private(set) var isWhenInUseOnly = false
     @Published var errorMessage: String?
     @Published var enabled: Bool {
         didSet {
@@ -102,8 +105,10 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     }
 
     private func start() {
+        isWhenInUseOnly = manager.authorizationStatus == .authorizedWhenInUse
         switch manager.authorizationStatus {
         case .notDetermined:
+            status = .waitingPermission
             manager.requestAlwaysAuthorization()
         case .authorizedAlways, .authorizedWhenInUse:
             manager.allowsBackgroundLocationUpdates = true
@@ -122,6 +127,7 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         UserDefaults.standard.set(true, forKey: Keys.pendingGap)
         policy = RecordingPolicy()
         lastFix = nil
+        isWhenInUseOnly = false
         status = .off
     }
 
