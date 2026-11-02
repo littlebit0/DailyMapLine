@@ -3,28 +3,22 @@ import MapLibre
 import SwiftUI
 
 enum MapStyle {
-    /// Local style over the small bundled Seoul extract. The production map provider is still undecided.
+    /// Local style over the bundled Protomaps Korea extract, so the map makes no network requests.
+    /// shortcut: Korea only, other regions stay empty until world data delivery is decided.
     static let url: URL? = {
-        guard let data = Bundle.main.url(forResource: "map", withExtension: "geojson") else { return nil }
-        let filter: (String) -> [Any] = { ["has", $0] }
-        let isLine: [Any] = ["==", ["geometry-type"], "LineString"]
-        let isPolygon: [Any] = ["==", ["geometry-type"], "Polygon"]
-        let roadCase: [String: Any] = ["line-color": "#d8d5ca", "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1, 17, 11]]
-        let road: [String: Any] = ["line-color": "#fffdf7", "line-width": ["interpolate", ["linear"], ["zoom"], 12, 0.6, 17, 8]]
-        let round = ["line-cap": "round", "line-join": "round"]
-        let highway: [Any] = ["all", isLine, filter("highway")]
+        let bundle = Bundle.main
+        guard let tiles = bundle.url(forResource: "korea", withExtension: "pmtiles"),
+              let glyphs = bundle.url(forResource: "Glyphs", withExtension: "bundle"),
+              let sprite = bundle.url(forResource: "light", withExtension: "png")?.deletingPathExtension(),
+              let layerFile = bundle.url(forResource: "basemap-layers", withExtension: "json"),
+              let layerData = try? Data(contentsOf: layerFile),
+              let layers = try? JSONSerialization.jsonObject(with: layerData) else { return nil }
         let style: [String: Any] = [
             "version": 8,
-            "sources": ["local": ["type": "geojson", "data": data.absoluteString, "attribution": "© OpenStreetMap contributors"]],
-            "layers": [
-                ["id": "land", "type": "background", "paint": ["background-color": "#f2f0e9"]],
-                ["id": "parks", "type": "fill", "source": "local", "filter": ["all", isPolygon, ["any", filter("leisure"), filter("landuse")]], "paint": ["fill-color": "#dce7cf"]],
-                ["id": "water", "type": "fill", "source": "local", "filter": ["==", ["get", "natural"], "water"], "paint": ["fill-color": "#c1dce7"]],
-                ["id": "stream", "type": "line", "source": "local", "filter": ["all", isLine, filter("waterway")], "paint": ["line-color": "#b6d9e8", "line-width": 5]],
-                ["id": "buildings", "type": "fill", "source": "local", "filter": filter("building"), "paint": ["fill-color": "#dedbd4", "fill-outline-color": "#d2cfc7"]],
-                ["id": "road-case", "type": "line", "source": "local", "filter": highway, "paint": roadCase, "layout": round],
-                ["id": "roads", "type": "line", "source": "local", "filter": highway, "paint": road, "layout": round],
-            ] as [[String: Any]],
+            "glyphs": glyphs.absoluteString + "{fontstack}/{range}.pbf",
+            "sprite": sprite.absoluteString,
+            "sources": ["protomaps": ["type": "vector", "url": "pmtiles://" + tiles.absoluteString, "attribution": "Protomaps © OpenStreetMap"]],
+            "layers": layers,
         ]
         guard let json = try? JSONSerialization.data(withJSONObject: style),
               let folder = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true) else { return nil }

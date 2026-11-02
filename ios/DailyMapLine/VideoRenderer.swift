@@ -113,11 +113,11 @@ enum VideoRenderer {
             drawLabel(date.replacingOccurrences(of: "-", with: "."), at: CGPoint(x: 14, y: 16), size: 12)
             context.setStrokeColor(UIColor(red: 0.157, green: 0.275, blue: 0.357, alpha: 1).cgColor)
             context.setLineWidth(1)
-            context.move(to: CGPoint(x: 15, y: 606))
-            context.addLine(to: CGPoint(x: 15 + scaleBarPoints, y: 606))
+            context.move(to: CGPoint(x: 15, y: 584))
+            context.addLine(to: CGPoint(x: 15 + scaleBarPoints, y: 584))
             context.strokePath()
-            drawLabel(String(format: "%.1f km", scaleKm), at: CGPoint(x: 11, y: 586), size: 9)
-            drawLabel("Map data © OpenStreetMap contributors · ODbL", at: CGPoint(x: 11, y: 616), size: 8)
+            drawLabel(String(format: "%.1f km", scaleKm), at: CGPoint(x: 11, y: 564), size: 9)
+            drawLabel("Protomaps · Map data © OpenStreetMap contributors · ODbL", at: CGPoint(x: 11, y: 592), size: 8)
         }
     }
 

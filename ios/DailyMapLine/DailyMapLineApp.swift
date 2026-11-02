@@ -43,7 +43,7 @@ struct MainView: View {
 
 private struct Attribution: View {
     var body: some View {
-        Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
+        Link("Protomaps © OpenStreetMap", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
             .font(.caption2)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
