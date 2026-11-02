@@ -18,8 +18,8 @@ enum VideoRenderer {
 
     static func render(date: String, timeline: VideoTimeline, progress: @escaping (Double) -> Void) async throws -> URL {
         guard let style = MapStyle.url else { throw VideoFailure(errorDescription: "지도 스타일을 준비하지 못했어요.") }
-        guard timeline.lengthMeters > 0 else { throw VideoFailure(errorDescription: "영상을 만들 수 있는 이동 경로가 없어요.") }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("DailyMapLine-\(date).mp4")
+        guard timeline.lengthMeters > 0 else { throw VideoFailure(errorDescription: "기록영상을 만들 수 있는 이동 경로가 없어요.") }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("DailyMapLine-\(date.replacingOccurrences(of: " – ", with: "_")).mp4")
         try? FileManager.default.removeItem(at: url)
 
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
@@ -33,10 +33,9 @@ enum VideoRenderer {
             kCVPixelBufferWidthKey as String: width, kCVPixelBufferHeightKey as String: height,
         ])
         writer.add(input)
-        guard writer.startWriting() else { throw writer.error ?? VideoFailure(errorDescription: "영상 파일을 시작하지 못했어요.") }
+        guard writer.startWriting() else { throw writer.error ?? VideoFailure(errorDescription: "기록영상 파일을 시작하지 못했어요.") }
         writer.startSession(atSourceTime: .zero)
 
-        let turns = timeline.runs.flatMap { directionChanges($0) }.map(\.coordinate)
         let frames = max(1, Int((timeline.durationSeconds * Double(fps)).rounded(.up)))
         var scale = 1.0
         for index in 0...frames {
@@ -44,20 +43,19 @@ enum VideoRenderer {
             guard let frame = timeline.frame(at: position) else { continue }
             scale += (frame.targetScaleKm - scale) * min(1, 7.0 / Double(fps))
             let snapshot = try await snapshot(style: style, center: frame.center, scaleKm: scale)
-            let traces = timeline.traces(upTo: position)
-            let image = compose(snapshot, traces: traces, turns: turns.filter { turn in traces.contains { $0.contains(turn) } }, date: date, scaleKm: scale)
+            let image = compose(snapshot, traces: timeline.traces(upTo: position), date: date, scaleKm: scale)
             while !input.isReadyForMoreMediaData { try await Task.sleep(nanoseconds: 5_000_000) }
             guard let pool = adaptor.pixelBufferPool, let buffer = pixelBuffer(image, pool: pool) else {
-                throw VideoFailure(errorDescription: "영상 프레임을 만들지 못했어요.")
+                throw VideoFailure(errorDescription: "기록영상 프레임을 만들지 못했어요.")
             }
             guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(index), timescale: CMTimeScale(fps))) else {
-                throw writer.error ?? VideoFailure(errorDescription: "영상 프레임을 쓰지 못했어요.")
+                throw writer.error ?? VideoFailure(errorDescription: "기록영상 프레임을 쓰지 못했어요.")
             }
             progress(Double(index) / Double(frames))
         }
         input.markAsFinished()
         await writer.finishWriting()
-        guard writer.status == .completed else { throw writer.error ?? VideoFailure(errorDescription: "영상을 저장하지 못했어요.") }
+        guard writer.status == .completed else { throw writer.error ?? VideoFailure(errorDescription: "기록영상을 저장하지 못했어요.") }
         return url
     }
 
@@ -80,7 +78,7 @@ enum VideoRenderer {
         }
     }
 
-    private static func compose(_ snapshot: MLNMapSnapshot, traces: [[Coordinate]], turns: [Coordinate], date: String, scaleKm: Double) -> UIImage {
+    private static func compose(_ snapshot: MLNMapSnapshot, traces: [[Coordinate]], date: String, scaleKm: Double) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = pixelScale
         format.opaque = true
@@ -100,15 +98,6 @@ enum VideoRenderer {
                     }
                     context.strokePath()
                 }
-            }
-            for turn in turns {
-                let point = snapshot.point(for: turn.location)
-                let circle = CGRect(x: point.x - 2.5, y: point.y - 2.5, width: 5, height: 5)
-                context.setFillColor(blue.cgColor)
-                context.fillEllipse(in: circle)
-                context.setStrokeColor(UIColor.white.cgColor)
-                context.setLineWidth(1)
-                context.strokeEllipse(in: circle)
             }
             drawLabel(date.replacingOccurrences(of: "-", with: "."), at: CGPoint(x: 14, y: 16), size: 12)
             context.setStrokeColor(UIColor(red: 0.157, green: 0.275, blue: 0.357, alpha: 1).cgColor)

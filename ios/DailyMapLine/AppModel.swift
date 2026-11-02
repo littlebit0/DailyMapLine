@@ -3,7 +3,7 @@ import DailyMapLineCore
 import Foundation
 
 enum RecordingStatus {
-    case off, waitingPermission, denied, moving, stopped, noSignal
+    case off, waitingPermission, denied, moving, stopped, noSignal, noRoad
 
     var text: String {
         switch self {
@@ -13,6 +13,7 @@ enum RecordingStatus {
         case .moving: "이동을 기록하고 있어요."
         case .stopped: "머무는 동안 노드 기록을 쉬고 있어요."
         case .noSignal: "현재 위치를 받지 못하고 있어요."
+        case .noRoad: "길이 없는 곳이라 기록하지 않고 있어요."
         }
     }
 }
@@ -25,6 +26,7 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published private(set) var hasUnconnected = false
     /// Only "Always" lets iOS relaunch the app for recording after it is fully closed.
     @Published private(set) var isWhenInUseOnly = false
+    @Published private(set) var locationAllowed = false
     @Published var errorMessage: String?
     @Published var enabled: Bool {
         didSet {
@@ -51,7 +53,7 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         enabled = UserDefaults.standard.bool(forKey: Keys.enabled)
         router = Bundle.main.url(forResource: "roads", withExtension: "json")
             .flatMap { try? Data(contentsOf: $0) }
-            .flatMap { try? RoadRouter(json: $0) }
+            .flatMap { try? RoadRouter(json: $0, coverage: (lon: 126.9735...126.986, lat: 37.563...37.574)) }
         do {
             store = try RecordStore(path: try Self.databaseURL().path)
         } catch {
@@ -62,6 +64,7 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
         manager.pausesLocationUpdatesAutomatically = false
+        updateLocationAllowed()
         seedForDebug()
         reload()
         if enabled {
@@ -85,9 +88,12 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     private func seedForDebug() {
         #if DEBUG
         guard ProcessInfo.processInfo.arguments.contains("-seedSample"), let store, (try? store.lastNode()) == nil else { return }
-        let sample = [(126.9774, 37.5664), (126.9770, 37.5701), (126.9831, 37.5703), (126.9826, 37.5662), (126.9774, 37.5664)]
+        let sample = [
+            (126.9774, 37.5664, "2026-10-31"), (126.9770, 37.5701, "2026-10-31"), (126.9831, 37.5703, "2026-10-31"),
+            (126.9826, 37.5662, "2026-10-31"), (126.9774, 37.5664, "2026-10-31"), (126.9831, 37.5703, "2026-11-01"),
+        ]
         for point in sample {
-            try? store.record(Coordinate(lon: point.0, lat: point.1), date: "2026-10-31", router: router)
+            try? store.record(Coordinate(lon: point.0, lat: point.1), date: point.2, router: router)
         }
         #endif
     }
@@ -101,6 +107,19 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
             dates = Set(try store.recordedDates())
         } catch {
             errorMessage = "기록을 읽지 못했어요. \(error)"
+        }
+    }
+
+    private func updateLocationAllowed() {
+        locationAllowed = [.authorizedAlways, .authorizedWhenInUse].contains(manager.authorizationStatus)
+    }
+
+    /// For showing the current position only. Nothing is recorded unless recording is on.
+    func askForCurrentLocation() {
+        if manager.authorizationStatus == .notDetermined {
+            manager.requestWhenInUseAuthorization()
+        } else if !locationAllowed {
+            errorMessage = "현재 위치를 보려면 설정 앱에서 위치 권한을 허용해 주세요."
         }
     }
 
@@ -132,7 +151,10 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        Task { @MainActor in if self.enabled { self.start() } }
+        Task { @MainActor in
+            self.updateLocationAllowed()
+            if self.enabled { self.start() }
+        }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -154,6 +176,12 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         if silent { UserDefaults.standard.set(true, forKey: Keys.pendingGap) }
         lastFix = (location, location.timestamp)
         let fix = Coordinate(lon: location.coordinate.longitude, lat: location.coordinate.latitude)
+        if router?.hasNoRoad(near: fix) == true {
+            // Off-road positions are not stored, so the next node must not connect across them.
+            UserDefaults.standard.set(true, forKey: Keys.pendingGap)
+            status = .noRoad
+            return
+        }
         let record = policy.shouldRecord(fix, speedKmh: speed, at: location.timestamp)
         status = policy.isStopped ? .stopped : .moving
         guard record, let store else { return }
@@ -176,7 +204,11 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
                 UserDefaults.standard.set(true, forKey: Keys.pendingGap)
             }
             try store.deleteDay(date: date)
-            try? FileManager.default.removeItem(at: FileManager.default.temporaryDirectory.appendingPathComponent("DailyMapLine-\(date).mp4"))
+            // Any generated video may cover this date, so none of them outlive the deletion.
+            let temporary = FileManager.default.temporaryDirectory
+            for file in (try? FileManager.default.contentsOfDirectory(atPath: temporary.path)) ?? [] where file.hasPrefix("DailyMapLine-") {
+                try? FileManager.default.removeItem(at: temporary.appendingPathComponent(file))
+            }
             reload()
             return true
         } catch {

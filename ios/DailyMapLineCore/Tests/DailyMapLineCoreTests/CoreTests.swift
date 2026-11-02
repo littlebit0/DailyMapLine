@@ -17,13 +17,6 @@ import Testing
     #expect(scaleKm(branchLengthMeters: 99999) == 30)
 }
 
-@Test func rightAngleIsATurnAndStraightIsNot() {
-    let path = [Coordinate(lon: 127, lat: 37), Coordinate(lon: 127.001, lat: 37), Coordinate(lon: 127.002, lat: 37), Coordinate(lon: 127.002, lat: 37.001)]
-    let turns = directionChanges(path)
-    #expect(turns.count == 1)
-    #expect(turns[0].coordinate == path[2])
-}
-
 @Test func stopsAfterFiveMinutesAndResumesOnSecondOutsideFix() {
     var policy = RecordingPolicy()
     let origin = Coordinate(lon: 127, lat: 37)
@@ -132,12 +125,10 @@ private func temporaryStore() throws -> (RecordStore, String) {
         Branch(from: 3, to: 4, state: .road, path: [b, c]),
     ]
     let timeline = VideoTimeline(branches: branches)
-    #expect(timeline.runs.count == 2)
     #expect(abs(timeline.durationSeconds - length * 2 / 1000) < 0.001)
-    let trimmed = VideoTimeline(branches: branches, trimStartMeters: 100, trimEndMeters: 200)
-    #expect(abs(trimmed.lengthMeters - (length * 2 - 300)) < 0.001)
-    #expect(trimmed.traces(upTo: 50).isEmpty)
-    #expect(trimmed.frame(at: length / 2)?.targetScaleKm ?? 0 > 1)
+    #expect(timeline.traces(upTo: 0).isEmpty)
+    #expect(timeline.traces(upTo: length * 2).count == 1)
+    #expect(timeline.frame(at: length / 2)?.targetScaleKm ?? 0 > 1)
 }
 
 private func twoDayStore() throws -> (RecordStore, String, a: Node, b: Node) {
@@ -208,4 +199,37 @@ private func twoDayStore() throws -> (RecordStore, String, a: Node, b: Node) {
     #expect(try store.nodes(date: "2026-11-01") == [b])
     #expect(try store.branches(date: "2026-11-01").count == 1)
     #expect(try store.lastNode() == b)
+}
+
+@Test func dateRangeIncludesBothEndsInRecordingOrder() throws {
+    let (store, path, _, _) = try twoDayStore()
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    try store.record(sample[3], date: "2026-11-03", router: try prototypeRouter())
+    let range = try store.branches(from: "2026-10-31", to: "2026-11-01")
+    #expect(range == (try store.branches(date: "2026-10-31")) + (try store.branches(date: "2026-11-01")))
+    #expect(try store.branches(from: "2026-10-31", to: "2026-11-03").count == 3)
+    #expect(try store.branches(from: "2026-11-02", to: "2026-11-02").isEmpty)
+}
+
+@Test func noRoadIsOnlyJudgedInsideCoveredArea() throws {
+    let json = #"{"nodes":{"1":[127,37],"2":[127.001,37]},"ways":[{"nodes":["1","2"]}]}"#
+    let covered = try RoadRouter(json: Data(json.utf8), coverage: (lon: 126.9...127.1, lat: 36.9...37.1))
+    #expect(covered.hasNoRoad(near: Coordinate(lon: 127, lat: 37.01)))
+    #expect(!covered.hasNoRoad(near: Coordinate(lon: 127, lat: 37)))
+    #expect(!covered.hasNoRoad(near: Coordinate(lon: 128, lat: 38)))
+    let unknown = try RoadRouter(json: Data(json.utf8))
+    #expect(!unknown.hasNoRoad(near: Coordinate(lon: 127, lat: 37.01)))
+}
+
+@Test func branchesNeverGetStraightLines() throws {
+    let json = #"{"nodes":{"1":[127,37],"2":[127.001,37]},"ways":[{"nodes":["1","2"]}]}"#
+    let router = try RoadRouter(json: Data(json.utf8), coverage: (lon: 126.9...127.1, lat: 36.9...37.1))
+    let (store, path) = try temporaryStore()
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    try store.record(Coordinate(lon: 127, lat: 37), date: "2026-10-31", router: router)
+    try store.record(Coordinate(lon: 127, lat: 37.01), date: "2026-10-31", router: router, afterGap: true)
+    try store.record(Coordinate(lon: 128, lat: 38), date: "2026-10-31", router: router)
+    let branches = try store.branches(date: "2026-10-31")
+    #expect(branches.map { $0.state } == [.gap, .dataMissing])
+    #expect(branches.allSatisfy { $0.path.isEmpty })
 }

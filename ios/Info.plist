@@ -7,10 +7,10 @@
 		<string>location</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>이동 경로를 지도와 영상으로 만들기 위해 위치를 기록합니다. 기록은 이 기기에만 저장합니다.</string>
+	<string>이동 경로를 지도와 기록영상으로 만들기 위해 위치를 기록합니다. 기록은 이 기기에만 저장합니다.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>앱을 닫아 둔 동안에도 이동을 기록하려면 항상 허용이 필요합니다. 기록은 이 기기에만 저장합니다.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>만든 영상을 사진 보관함에 저장합니다.</string>
+	<string>만든 기록영상을 사진 보관함에 저장합니다.</string>
 </dict>
 </plist>

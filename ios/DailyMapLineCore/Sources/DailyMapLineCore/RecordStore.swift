@@ -8,8 +8,6 @@ public struct Node: Equatable, Sendable {
 
 public enum BranchState: String, Sendable {
     case road
-    /// Confirmed "no road" connection. Nothing produces this until real road absence can be determined.
-    case direct
     case dataMissing
     case failed
     /// Recording or reception break. Never drawn as a connection.
@@ -152,6 +150,11 @@ public final class RecordStore {
 
     public func branches(date: String) throws -> [Branch] {
         try branches(where: "WHERE d.date = ?", [.text(date)])
+    }
+
+    /// Inclusive range of local dates, in recording order.
+    public func branches(from start: String, to end: String) throws -> [Branch] {
+        try branches(where: "WHERE d.date BETWEEN ? AND ?", [.text(start), .text(end)])
     }
 
     public func allBranches() throws -> [Branch] {
