@@ -1,0 +1,7 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+app/src/main/assets/korea.pmtiles
+app/src/main/assets/valhalla_tiles.tar
