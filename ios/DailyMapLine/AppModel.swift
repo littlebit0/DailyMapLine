@@ -44,16 +44,15 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     private static let gapSeconds: TimeInterval = 600
 
     let store: RecordStore?
-    private let router: RoadRouter?
+    private let router: (any RoadRouting)?
     private let manager = CLLocationManager()
     private var policy = RecordingPolicy()
     private var lastFix: (location: CLLocation, time: Date)?
 
     override init() {
         enabled = UserDefaults.standard.bool(forKey: Keys.enabled)
-        router = Bundle.main.url(forResource: "roads", withExtension: "json")
-            .flatMap { try? Data(contentsOf: $0) }
-            .flatMap { try? RoadRouter(json: $0, coverage: (lon: 126.9735...126.986, lat: 37.563...37.574)) }
+        // Without the tiles every branch is kept as dataMissing until they are available.
+        router = Bundle.main.url(forResource: "valhalla_tiles", withExtension: "tar").flatMap(ValhallaRouter.init(tiles:))
         do {
             store = try RecordStore(path: try Self.databaseURL().path)
         } catch {
@@ -66,6 +65,9 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         manager.pausesLocationUpdatesAutomatically = false
         updateLocationAllowed()
         seedForDebug()
+        if let store, let router {
+            _ = try? store.recalculateUnconnected(router: router)
+        }
         reload()
         if enabled {
             // A new process cannot know what happened since the last fix.
@@ -187,7 +189,7 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         guard record, let store else { return }
         do {
             let afterGap = UserDefaults.standard.bool(forKey: Keys.pendingGap)
-            try store.record(fix, date: Self.localDate(location.timestamp), router: router, afterGap: afterGap)
+            try store.record(fix, date: Self.localDate(location.timestamp), router: router, speedKmh: speed, afterGap: afterGap)
             UserDefaults.standard.set(false, forKey: Keys.pendingGap)
             reload()
         } catch {
@@ -213,6 +215,21 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
             return true
         } catch {
             errorMessage = "기록을 삭제하지 못했어요. 기존 기록은 그대로예요. \(error)"
+            return false
+        }
+    }
+
+    /// Returns false when the restore failed; existing records stay intact in that case.
+    func restoreBackup(_ data: Data) -> Bool {
+        guard let store else { return false }
+        do {
+            // The restored last node is unrelated to the next position.
+            UserDefaults.standard.set(true, forKey: Keys.pendingGap)
+            try store.restoreBackup(data)
+            reload()
+            return true
+        } catch {
+            errorMessage = "백업을 복원하지 못했어요. 기존 기록은 그대로예요. \(error)"
             return false
         }
     }

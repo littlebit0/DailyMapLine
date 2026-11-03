@@ -233,3 +233,50 @@ private func twoDayStore() throws -> (RecordStore, String, a: Node, b: Node) {
     #expect(branches.map { $0.state } == [.gap, .dataMissing])
     #expect(branches.allSatisfy { $0.path.isEmpty })
 }
+
+@Test func backupRestoreReplacesRecordsExactly() throws {
+    let (source, sourcePath, _, b) = try twoDayStore()
+    defer { try? FileManager.default.removeItem(atPath: sourcePath) }
+    try source.deleteDay(date: "2026-10-31")
+    let backup = try source.exportBackup()
+    #expect(try RecordStore.inspectBackup(backup) == BackupSummary(dates: ["2026-11-01"], nodeCount: 2, branchCount: 1))
+    let (target, targetPath) = try temporaryStore()
+    defer { try? FileManager.default.removeItem(atPath: targetPath) }
+    try target.record(sample[4], date: "2026-12-25", router: nil)
+    try target.restoreBackup(backup)
+    #expect(try target.recordedDates() == ["2026-11-01"])
+    #expect(try target.nodes(date: "2026-11-01") == [b])
+    #expect(try target.branches(date: "2026-11-01") == source.branches(date: "2026-11-01"))
+    let next = try target.record(sample[0], date: "2026-11-02", router: nil, afterGap: true)
+    #expect(next.id > b.id)
+}
+
+@Test func damagedBackupIsRejectedAndKeepsRecords() throws {
+    let (store, path, a, _) = try twoDayStore()
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    var backup = try store.exportBackup()
+    backup[backup.count - 1] ^= 0xFF
+    #expect(throws: StoreError.self) { try store.restoreBackup(backup) }
+    #expect(throws: StoreError.self) { try RecordStore.inspectBackup(Data("not a backup".utf8)) }
+    #expect(try store.nodes(date: "2026-10-31").last == a)
+    #expect(try store.recordedDates().count == 2)
+}
+
+@Test func polyline6Decodes() {
+    // Valhalla's documented example encoding of (lat 38.5, lon -120.2), (40.7, -120.95), (43.252, -126.453) at 1e6.
+    let path = decodePolyline6("_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI")
+    #expect(path == [Coordinate(lon: -120.2, lat: 38.5), Coordinate(lon: -120.95, lat: 40.7), Coordinate(lon: -126.453, lat: 43.252)])
+}
+
+@Test func recalculationConnectsOnlyMissingBranches() throws {
+    let (store, path) = try temporaryStore()
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    try store.record(sample[0], date: "2026-10-31", router: nil)
+    try store.record(sample[1], date: "2026-10-31", router: nil)
+    try store.record(sample[2], date: "2026-10-31", router: nil, afterGap: true)
+    #expect(try store.branches(date: "2026-10-31").map { $0.state } == [.dataMissing, .gap])
+    #expect(try store.recalculateUnconnected(router: try prototypeRouter()) == 1)
+    let branches = try store.branches(date: "2026-10-31")
+    #expect(branches.map { $0.state } == [.road, .gap])
+    #expect(branches[0].path.count > 2)
+}

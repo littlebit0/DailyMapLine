@@ -3,3 +3,4 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 DailyMapLine/Resources/korea.pmtiles
+DailyMapLine/Resources/valhalla_tiles.tar

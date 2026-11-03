@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		A10000000000000000000001 /* DailyMapLineCore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000002 /* DailyMapLineCore */; };
 		A10000000000000000000003 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000004 /* MapLibre */; };
+		A10000000000000000000005 /* Valhalla in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000006 /* Valhalla */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +28,7 @@
 			files = (
 				A10000000000000000000001 /* DailyMapLineCore in Frameworks */,
 				A10000000000000000000003 /* MapLibre in Frameworks */,
+				A10000000000000000000005 /* Valhalla in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -72,6 +74,7 @@
 			packageProductDependencies = (
 				A10000000000000000000002 /* DailyMapLineCore */,
 				A10000000000000000000004 /* MapLibre */,
+				A10000000000000000000006 /* Valhalla */,
 			);
 			productName = DailyMapLine;
 			productReference = A10000000000000000000010 /* DailyMapLine.app */;
@@ -99,6 +102,7 @@
 			packageReferences = (
 				A10000000000000000000070 /* XCLocalSwiftPackageReference "DailyMapLineCore" */,
 				A10000000000000000000071 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
+				A10000000000000000000072 /* XCRemoteSwiftPackageReference "valhalla-mobile" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A10000000000000000000031 /* Products */;
@@ -168,6 +172,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = A6Y73X2ZLS;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
@@ -188,6 +193,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = A6Y73X2ZLS;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
@@ -243,6 +249,14 @@
 				version = 7.0.0;
 			};
 		};
+		A10000000000000000000072 /* XCRemoteSwiftPackageReference "valhalla-mobile" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Rallista/valhalla-mobile";
+			requirement = {
+				kind = exactVersion;
+				version = 0.6.4;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -254,6 +268,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A10000000000000000000071 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */;
 			productName = MapLibre;
+		};
+		A10000000000000000000006 /* Valhalla */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000072 /* XCRemoteSwiftPackageReference "valhalla-mobile" */;
+			productName = Valhalla;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

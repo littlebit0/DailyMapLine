@@ -1,15 +1,9 @@
+import DailyMapLineCore
 import Foundation
 
-public enum RouteResult: Equatable, Sendable {
-    case road([Coordinate])
-    /// Outside the area the road data covers. Missing data is never treated as "no road exists".
-    case dataMissing
-    case failed
-}
-
-/// Shortest-path estimate over bundled road data, ported from the prototype. It is not the observed trip.
-/// No direction, access or vehicle rules. The production routing engine is still undecided.
-public struct RoadRouter: Sendable {
+/// Test fixture: shortest path over the prototype's small Seoul road graph.
+/// The app routes with Valhalla; this keeps store tests fast and deterministic.
+struct RoadRouter: RoadRouting {
     private struct Edge: Sendable { let to: String; let cost: Double }
     private struct Payload: Decodable {
         let nodes: [String: [Double]]
@@ -23,7 +17,7 @@ public struct RoadRouter: Sendable {
     private let coverage: (lon: ClosedRange<Double>, lat: ClosedRange<Double>)?
 
     /// Without `coverage`, no location can be judged road-free.
-    public init(json: Data, snapLimit: Double = 80, coverage: (lon: ClosedRange<Double>, lat: ClosedRange<Double>)? = nil) throws {
+    init(json: Data, snapLimit: Double = 80, coverage: (lon: ClosedRange<Double>, lat: ClosedRange<Double>)? = nil) throws {
         let payload = try JSONDecoder().decode(Payload.self, from: json)
         var nodes: [String: Coordinate] = [:]
         for (id, value) in payload.nodes where value.count == 2 {
@@ -44,14 +38,14 @@ public struct RoadRouter: Sendable {
         self.coverage = coverage
     }
 
-    public func route(from a: Coordinate, to b: Coordinate) -> RouteResult {
+    func route(from a: Coordinate, to b: Coordinate, speedKmh: Double) -> RouteResult {
         guard let start = nearest(a), let end = nearest(b) else { return .dataMissing }
         guard let ids = findPath(start, end) else { return .failed }
         return .road(ids.compactMap { nodes[$0] })
     }
 
     /// True only inside the covered area, so missing data is never read as "no road exists".
-    public func hasNoRoad(near point: Coordinate) -> Bool {
+    func hasNoRoad(near point: Coordinate) -> Bool {
         guard let coverage, coverage.lon.contains(point.lon), coverage.lat.contains(point.lat) else { return false }
         return nearest(point) == nil
     }

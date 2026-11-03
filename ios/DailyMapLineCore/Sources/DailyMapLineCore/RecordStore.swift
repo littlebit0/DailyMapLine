@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SQLite3
 
@@ -27,6 +28,69 @@ public struct DeletionPreview: Equatable, Sendable {
     public let retainedNodes: Int
     /// Later dates whose connection starts from a retained node.
     public let referencedBy: [String]
+}
+
+public struct BackupSummary: Equatable, Sendable {
+    public let dates: [String]
+    public let nodeCount: Int
+    public let branchCount: Int
+}
+
+/// Compressed, unencrypted single-file backup: magic, SHA-256 of the JSON, then zlib-compressed JSON.
+private struct BackupPayload: Codable {
+    struct Day: Codable { let id: Int64; let date: String }
+    struct StoredNode: Codable { let id: Int64; let dayID: Int64; let lon: Double; let lat: Double; let retained: Bool }
+    struct StoredBranch: Codable { let dayID: Int64; let from: Int64; let to: Int64; let state: String; let path: [Coordinate] }
+
+    static let magic = Data("DMLBACKUP1\n".utf8)
+    let formatVersion: Int
+    let days: [Day]
+    let nodes: [StoredNode]
+    let branches: [StoredBranch]
+
+    func encoded() throws -> Data {
+        let json = try JSONEncoder().encode(self)
+        return Self.magic + Data(SHA256.hash(data: json)) + (try (json as NSData).compressed(using: .zlib) as Data)
+    }
+
+    /// Rejects anything that could not restore into a consistent database.
+    static func decode(_ data: Data) throws -> BackupPayload {
+        let digestLength = SHA256.byteCount
+        guard data.count > magic.count + digestLength, data.prefix(magic.count) == magic else {
+            throw StoreError(description: "DailyMapLine 백업 파일이 아니에요.")
+        }
+        let digest = data.dropFirst(magic.count).prefix(digestLength)
+        let body = Data(data.dropFirst(magic.count + digestLength))
+        guard let json = try? (body as NSData).decompressed(using: .zlib) as Data,
+              Data(SHA256.hash(data: json)) == digest,
+              let payload = try? JSONDecoder().decode(BackupPayload.self, from: json) else {
+            throw StoreError(description: "백업 파일이 손상되었어요.")
+        }
+        guard payload.formatVersion == 1 else {
+            throw StoreError(description: "지원하지 않는 백업 버전이에요.")
+        }
+        let dayIDs = Set(payload.days.map(\.id))
+        let nodeIDs = Set(payload.nodes.map(\.id))
+        let valid = dayIDs.count == payload.days.count
+            && Set(payload.days.map(\.date)).count == payload.days.count
+            && nodeIDs.count == payload.nodes.count
+            && payload.nodes.allSatisfy { dayIDs.contains($0.dayID) }
+            && payload.branches.allSatisfy {
+                dayIDs.contains($0.dayID) && nodeIDs.contains($0.from) && nodeIDs.contains($0.to) && BranchState(rawValue: $0.state) != nil
+            }
+            && Set(payload.branches.map(\.to)).count == payload.branches.count
+        guard valid else { throw StoreError(description: "백업 파일의 내용이 올바르지 않아요.") }
+        return payload
+    }
+
+    var summary: BackupSummary {
+        let recorded = Set(nodes.filter { !$0.retained }.map(\.dayID))
+        return BackupSummary(
+            dates: days.filter { recorded.contains($0.id) }.map(\.date).sorted(),
+            nodeCount: nodes.count,
+            branchCount: branches.count
+        )
+    }
 }
 
 public struct StoreError: Error, CustomStringConvertible {
@@ -76,7 +140,7 @@ public final class RecordStore {
 
     /// Saves the node first in its own transaction, so a routing failure cannot lose the observed position.
     @discardableResult
-    public func record(_ coordinate: Coordinate, date: String, router: RoadRouter?, afterGap: Bool = false) throws -> Node {
+    public func record(_ coordinate: Coordinate, date: String, router: (any RoadRouting)?, speedKmh: Double = 0, afterGap: Bool = false) throws -> Node {
         let previous = try lastNode()
         let node = try transaction { () -> Node in
             try run("INSERT OR IGNORE INTO days(date) VALUES (?)", [.text(date)])
@@ -90,7 +154,7 @@ public final class RecordStore {
         if afterGap {
             state = .gap
         } else {
-            switch router?.route(from: previous.coordinate, to: coordinate) ?? .dataMissing {
+            switch router?.route(from: previous.coordinate, to: coordinate, speedKmh: speedKmh) ?? .dataMissing {
             case .road(let road): (state, path) = (.road, road)
             case .dataMissing: state = .dataMissing
             case .failed: state = .failed
@@ -102,6 +166,28 @@ public final class RecordStore {
             [.int(try dayID(date)!), .int(previous.id), .int(node.id), .text(state.rawValue), .text(encoded)]
         )
         return node
+    }
+
+    /// Retries branches that missing data or a failed calculation left unconnected. Gaps stay gaps.
+    @discardableResult
+    public func recalculateUnconnected(router: any RoadRouting) throws -> Int {
+        let pending = try query("""
+            SELECT b.id, f.lon, f.lat, t.lon, t.lat FROM branches b
+            JOIN nodes f ON f.id = b.from_node JOIN nodes t ON t.id = b.to_node
+            WHERE b.state IN ('dataMissing', 'failed')
+            """) {
+            (id: sqlite3_column_int64($0, 0),
+             from: Coordinate(lon: sqlite3_column_double($0, 1), lat: sqlite3_column_double($0, 2)),
+             to: Coordinate(lon: sqlite3_column_double($0, 3), lat: sqlite3_column_double($0, 4)))
+        }
+        var connected = 0
+        for branch in pending {
+            guard case .road(let path) = router.route(from: branch.from, to: branch.to, speedKmh: 0) else { continue }
+            let encoded = String(decoding: try JSONEncoder().encode(path), as: UTF8.self)
+            try run("UPDATE branches SET state = 'road', path = ? WHERE id = ?", [.text(encoded), .int(branch.id)])
+            connected += 1
+        }
+        return connected
     }
 
     public func recordedDates() throws -> [String] {
@@ -180,6 +266,54 @@ public final class RecordStore {
 
     private func dayID(_ date: String) throws -> Int64? {
         try query("SELECT id FROM days WHERE date = ?", [.text(date)]) { sqlite3_column_int64($0, 0) }.first
+    }
+
+    // MARK: Backup
+
+    public func exportBackup() throws -> Data {
+        let days = try query("SELECT id, date FROM days ORDER BY id") {
+            BackupPayload.Day(id: sqlite3_column_int64($0, 0), date: text($0, 1))
+        }
+        let nodes = try query("SELECT id, day_id, lon, lat, retained FROM nodes ORDER BY id") {
+            BackupPayload.StoredNode(
+                id: sqlite3_column_int64($0, 0), dayID: sqlite3_column_int64($0, 1),
+                lon: sqlite3_column_double($0, 2), lat: sqlite3_column_double($0, 3), retained: sqlite3_column_int($0, 4) != 0
+            )
+        }
+        let branches = try query("SELECT day_id, from_node, to_node, state, path FROM branches ORDER BY to_node") { row in
+            BackupPayload.StoredBranch(
+                dayID: sqlite3_column_int64(row, 0), from: sqlite3_column_int64(row, 1), to: sqlite3_column_int64(row, 2),
+                state: text(row, 3), path: try JSONDecoder().decode([Coordinate].self, from: Data(text(row, 4).utf8))
+            )
+        }
+        return try BackupPayload(formatVersion: 1, days: days, nodes: nodes, branches: branches).encoded()
+    }
+
+    /// Validates a backup without touching existing records.
+    public static func inspectBackup(_ data: Data) throws -> BackupSummary {
+        try BackupPayload.decode(data).summary
+    }
+
+    /// Replaces all records with the backup, all or nothing.
+    public func restoreBackup(_ data: Data) throws {
+        let payload = try BackupPayload.decode(data)
+        try transaction {
+            try execute("DELETE FROM branches; DELETE FROM nodes; DELETE FROM days;")
+            for day in payload.days {
+                try run("INSERT INTO days(id, date) VALUES (?, ?)", [.int(day.id), .text(day.date)])
+            }
+            for node in payload.nodes {
+                try run("INSERT INTO nodes(id, day_id, lon, lat, retained) VALUES (?, ?, ?, ?, ?)", [.int(node.id), .int(node.dayID), .real(node.lon), .real(node.lat), .int(node.retained ? 1 : 0)])
+            }
+            for branch in payload.branches {
+                let path = String(decoding: try JSONEncoder().encode(branch.path), as: UTF8.self)
+                try run("INSERT INTO branches(day_id, from_node, to_node, state, path) VALUES (?, ?, ?, ?, ?)", [.int(branch.dayID), .int(branch.from), .int(branch.to), .text(branch.state), .text(path)])
+            }
+        }
+    }
+
+    public func nodeCount() throws -> Int {
+        try query("SELECT COUNT(*) FROM nodes") { Int(sqlite3_column_int($0, 0)) }.first ?? 0
     }
 
     // MARK: SQLite

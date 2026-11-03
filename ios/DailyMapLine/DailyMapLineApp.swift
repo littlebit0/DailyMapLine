@@ -2,6 +2,7 @@ import AVKit
 import DailyMapLineCore
 import Photos
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct DailyMapLineApp: App {
@@ -124,8 +125,28 @@ private struct IntroSheet: View {
     }
 }
 
+private struct BackupDocument: FileDocument {
+    static let readableContentTypes = [UTType.data]
+    let data: Data
+
+    init(data: Data) { self.data = data }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let contents = configuration.file.regularFileContents else { throw CocoaError(.fileReadCorruptFile) }
+        data = contents
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
+
 struct SettingsScreen: View {
     @EnvironmentObject private var model: AppModel
+    @State private var exportDocument: BackupDocument?
+    @State private var isImporting = false
+    @State private var pending: (data: Data, summary: BackupSummary)?
+    @State private var message: String?
 
     var body: some View {
         Form {
@@ -137,8 +158,63 @@ struct SettingsScreen: View {
                 }
                 if model.isWhenInUseOnly { AlwaysPermissionNotice().font(.footnote) }
             }
+            Section("백업") {
+                Button("기록 내보내기") { export() }
+                Button("기록 가져오기") { isImporting = true }
+                Text("백업 파일은 암호화되지 않아요. 파일을 가진 사람은 이동 기록을 볼 수 있으니 안전한 곳에 보관해 주세요.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                if let message { Text(message).font(.footnote) }
+            }
         }
         .navigationTitle("설정")
+        .fileExporter(
+            isPresented: Binding(get: { exportDocument != nil }, set: { if !$0 { exportDocument = nil } }),
+            document: exportDocument,
+            contentType: .data,
+            defaultFilename: "DailyMapLine-\(AppModel.localDate(Date())).dmlbackup"
+        ) { result in
+            switch result {
+            case .success: message = "기록을 내보냈어요."
+            case .failure(let error) where (error as? CocoaError)?.code == .userCancelled: message = nil
+            case .failure: message = "내보내지 못했어요. 기록은 그대로예요."
+            }
+        }
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.data]) { result in
+            if case .success(let url) = result { inspect(url) }
+        }
+        .alert("현재 기록을 모두 교체할까요?", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }), presenting: pending) { backup in
+            Button("교체", role: .destructive) {
+                if model.restoreBackup(backup.data) { message = "백업을 복원했어요." }
+            }
+            Button("취소", role: .cancel) {}
+        } message: { backup in
+            let current = (try? model.store?.nodeCount()) ?? 0
+            Text("현재 노드 \(current)개를 지우고, 백업의 \(backup.summary.dates.count)일치 기록(노드 \(backup.summary.nodeCount)개, 브랜치 \(backup.summary.branchCount)개)으로 바꿔요. 되돌릴 수 없어요.")
+        }
+    }
+
+    private func export() {
+        do {
+            guard let data = try model.store?.exportBackup() else { return }
+            exportDocument = BackupDocument(data: data)
+        } catch {
+            message = "내보내지 못했어요. 기록은 그대로예요."
+        }
+    }
+
+    private func inspect(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try Data(contentsOf: url)
+            pending = (data, try RecordStore.inspectBackup(data))
+            message = nil
+        } catch let error as StoreError {
+            message = error.description
+        } catch {
+            message = "파일을 읽지 못했어요."
+        }
     }
 }
 
