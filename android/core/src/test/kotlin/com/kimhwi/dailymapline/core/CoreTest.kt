@@ -33,7 +33,7 @@ class CoreTest {
         )
     }
 
-    @Test fun timelineUsesOneSecondPerKmAndSkipsGaps() {
+    @Test fun timelineLastsTwentySecondsAndSkipsGaps() {
         val a = Coordinate(127.0, 37.0)
         val b = Coordinate(127.02, 37.0)
         val c = Coordinate(127.04, 37.0)
@@ -43,9 +43,31 @@ class CoreTest {
             Branch(2, 3, BranchState.Gap, emptyList()),
             Branch(3, 4, BranchState.Road, listOf(b, c)),
         ))
-        assertEquals(length * 2 / 1000, timeline.durationSeconds, 0.001)
+        assertEquals(length * 2, timeline.lengthMeters, 0.001)
+        assertEquals(20.0, timeline.durationSeconds)
+        assertEquals(0.0, VideoTimeline(emptyList()).durationSeconds)
         assertTrue(timeline.traces(0.0).isEmpty())
         assertEquals(1, timeline.traces(length * 2).size)
         assertTrue((timeline.frame(length / 2)?.targetScaleKm ?: 0.0) > 1)
+    }
+
+    @Test fun travelTimeEstimateMatchesIos() {
+        assertEquals(listOf(300.0, 180.0, 120.0, 60.0), listOf(300.0, 900.0, 1500.0, 5000.0).map(::estimatedTravelSeconds))
+    }
+
+    @Test fun replayFollowsEstimatedTravelTime() {
+        val start = Coordinate(127.0, 37.0)
+        val walkEnd = Coordinate(127.003, 37.0)
+        val driveEnd = Coordinate(127.103, 37.0)
+        val timeline = VideoTimeline(listOf(
+            Branch(1, 2, BranchState.Road, listOf(start, walkEnd)),
+            Branch(2, 3, BranchState.Road, listOf(walkEnd, driveEnd)),
+        ))
+        val walkLength = distanceMeters(start, walkEnd)
+        assertEquals(walkLength, timeline.position(300.0 / 360), 0.01)
+        assertEquals(timeline.lengthMeters, timeline.position(1.0), 0.01)
+        assertEquals(1.0, timeline.frame(walkLength / 2)!!.targetScaleKm)
+        val driveScale = timeline.frame(walkLength + 4500)!!.targetScaleKm
+        assertTrue(driveScale > 8 && driveScale <= 30)
     }
 }

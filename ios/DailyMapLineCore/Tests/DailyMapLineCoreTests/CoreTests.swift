@@ -116,7 +116,7 @@ private func temporaryStore() throws -> (RecordStore, String) {
     #expect(try reopened.nodes(date: "2026-10-31") == [node])
 }
 
-@Test func timelineUsesOneSecondPerKmAndSkipsGaps() {
+@Test func timelineLastsTwentySecondsAndSkipsGaps() {
     let a = Coordinate(lon: 127, lat: 37), b = Coordinate(lon: 127.02, lat: 37), c = Coordinate(lon: 127.04, lat: 37)
     let length = distanceMeters(a, b)
     let branches = [
@@ -125,7 +125,9 @@ private func temporaryStore() throws -> (RecordStore, String) {
         Branch(from: 3, to: 4, state: .road, path: [b, c]),
     ]
     let timeline = VideoTimeline(branches: branches)
-    #expect(abs(timeline.durationSeconds - length * 2 / 1000) < 0.001)
+    #expect(abs(timeline.lengthMeters - length * 2) < 0.001)
+    #expect(timeline.durationSeconds == 20)
+    #expect(VideoTimeline(branches: []).durationSeconds == 0)
     #expect(timeline.traces(upTo: 0).isEmpty)
     #expect(timeline.traces(upTo: length * 2).count == 1)
     #expect(timeline.frame(at: length / 2)?.targetScaleKm ?? 0 > 1)
@@ -279,4 +281,28 @@ private func twoDayStore() throws -> (RecordStore, String, a: Node, b: Node) {
     let branches = try store.branches(date: "2026-10-31")
     #expect(branches.map { $0.state } == [.road, .gap])
     #expect(branches[0].path.count > 2)
+}
+
+@Test func travelTimeEstimateMatchesRecordingIntervals() {
+    #expect(estimatedTravelSeconds(lengthMeters: 300) == 300)
+    #expect(estimatedTravelSeconds(lengthMeters: 900) == 180)
+    #expect(estimatedTravelSeconds(lengthMeters: 1_500) == 120)
+    #expect(estimatedTravelSeconds(lengthMeters: 5_000) == 60)
+}
+
+@Test func replayFollowsEstimatedTravelTime() {
+    let walkEnd = Coordinate(lon: 127.003, lat: 37)
+    let driveEnd = Coordinate(lon: 127.103, lat: 37)
+    let walk = Branch(from: 1, to: 2, state: .road, path: [Coordinate(lon: 127, lat: 37), walkEnd])
+    let drive = Branch(from: 2, to: 3, state: .road, path: [walkEnd, driveEnd])
+    let timeline = VideoTimeline(branches: [walk, drive])
+    let walkLength = distanceMeters(walk.path[0], walkEnd)
+    // The 267 m walk takes 300 s and the 9 km drive 60 s, so the walk gets 300/360 of the video.
+    #expect(abs(timeline.position(at: 300.0 / 360) - walkLength) < 0.01)
+    #expect(abs(timeline.position(at: 1) - timeline.lengthMeters) < 0.01)
+    let walkScale = timeline.frame(at: walkLength / 2)?.targetScaleKm ?? 0
+    let driveScale = timeline.frame(at: walkLength + 4_500)?.targetScaleKm ?? 0
+    #expect(walkScale == 1)
+    #expect(driveScale > 8)
+    #expect(driveScale <= 30)
 }

@@ -8,8 +8,8 @@ import kotlin.math.sqrt
 
 data class Coordinate(val lon: Double, val lat: Double)
 
-/** Approved speed: 1 km per second (5x the original 5 s/km plan). */
-const val VIDEO_SECONDS_PER_KM = 1.0
+/** Every record video lasts this long whatever the distance (user decision, replacing 1 s per km). */
+const val VIDEO_DURATION_SECONDS = 20.0
 
 fun distanceMeters(a: Coordinate, b: Coordinate): Double {
     val rad = Math.PI / 180

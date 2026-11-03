@@ -389,7 +389,7 @@ struct RecordVideoScreen: View {
                     RecordRouteMap(branches: branches)
                         .frame(height: 220)
                         .overlay(alignment: .bottomLeading) { Attribution() }
-                    Text(String(format: "길이 %.2f km · 기록영상 약 %.1f초", timeline.lengthMeters / 1000, timeline.durationSeconds))
+                    Text(String(format: "길이 %.2f km · 기록영상 %.0f초", timeline.lengthMeters / 1000, timeline.durationSeconds))
                 }
                 Button("기록영상 만들기") { render() }
                     .buttonStyle(.borderedProminent)

@@ -319,7 +319,7 @@ private fun RecordVideoScreen(app: DailyMapLineApp, onBack: () -> Unit) {
                 }
                 if (timeline.lengthMeters > 0) {
                     RecordRouteMap(branches, Modifier.fillMaxWidth().height(220.dp))
-                    Text(String.format("길이 %.2f km · 기록영상 약 %.1f초", timeline.lengthMeters / 1000, timeline.durationSeconds))
+                    Text(String.format("길이 %.2f km · 기록영상 %.0f초", timeline.lengthMeters / 1000, timeline.durationSeconds))
                 }
                 Button(::render, Modifier.align(Alignment.CenterHorizontally), enabled = timeline.lengthMeters > 0) { Text("기록영상 만들기") }
             }
