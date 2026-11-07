@@ -6,7 +6,24 @@ import SwiftUI
 /// Stroking real paths keeps loop interiors covered unless buffers actually overlap there.
 final class FogOverlay: UIView {
     weak var map: MLNMapView?
-    var paths: [[Coordinate]] = [] { didSet { setNeedsDisplay() } }
+    var paths: [[Coordinate]] = [] {
+        didSet {
+            // Projected once; each frame only applies one affine transform instead of asking the map per point.
+            mercatorPaths = paths.filter { $0.count > 1 }.map { path in
+                let line = CGMutablePath()
+                line.addLines(between: path.map { Self.mercator($0.location) })
+                return (line, 100 / (40075016.686 * cos(path[0].lat * .pi / 180)))
+            }
+            setNeedsDisplay()
+        }
+    }
+    private var mercatorPaths: [(path: CGPath, width: CGFloat)] = []
+
+    /// Web Mercator in world units (0...1), the projection the map draws in, so screen = similarity transform.
+    private static func mercator(_ c: CLLocationCoordinate2D) -> CGPoint {
+        let lat = c.latitude * .pi / 180
+        return CGPoint(x: (c.longitude + 180) / 360, y: (1 - log(tan(lat) + 1 / cos(lat)) / .pi) / 2)
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -26,13 +43,19 @@ final class FogOverlay: UIView {
         context.setBlendMode(.clear)
         context.setLineCap(.round)
         context.setLineJoin(.round)
-        for path in paths where path.count > 1 {
-            context.setLineWidth(100 / map.metersPerPoint(atLatitude: path[0].lat))
-            context.beginPath()
-            for (index, coordinate) in path.enumerated() {
-                let point = map.convert(coordinate.location, toPointTo: self)
-                if index == 0 { context.move(to: point) } else { context.addLine(to: point) }
-            }
+        let s1 = CGPoint.zero, s2 = CGPoint(x: bounds.width, y: 0)
+        let m1 = Self.mercator(map.convert(s1, toCoordinateFrom: self))
+        let m2 = Self.mercator(map.convert(s2, toCoordinateFrom: self))
+        let scale = hypot(s2.x - s1.x, s2.y - s1.y) / max(hypot(m2.x - m1.x, m2.y - m1.y), .leastNonzeroMagnitude)
+        let angle = atan2(s2.y - s1.y, s2.x - s1.x) - atan2(m2.y - m1.y, m2.x - m1.x)
+        var transform = CGAffineTransform(translationX: -m1.x, y: -m1.y)
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(rotationAngle: angle))
+            .concatenating(CGAffineTransform(translationX: s1.x, y: s1.y))
+        for (path, width) in mercatorPaths {
+            guard let screen = path.copy(using: &transform) else { continue }
+            context.setLineWidth(width * scale)
+            context.addPath(screen)
             context.strokePath()
         }
         context.setBlendMode(.normal)
@@ -99,6 +122,7 @@ struct VisitedMap: UIViewRepresentable {
         overlay.map = map
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         container.addSubview(overlay)
+        addZoomStrip(to: container, map: map)
         context.coordinator.overlay = overlay
         return container
     }

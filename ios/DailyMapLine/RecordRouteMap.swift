@@ -6,17 +6,24 @@ import SwiftUI
 struct RecordRouteMap: UIViewRepresentable {
     var branches: [Branch]
 
-    func makeUIView(context: Context) -> MLNMapView {
-        makeBaseMap(delegate: context.coordinator)
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        let map = makeBaseMap(delegate: context.coordinator)
+        container.addSubview(map)
+        addZoomStrip(to: container, map: map)
+        context.coordinator.map = map
+        return container
     }
 
-    func updateUIView(_ map: MLNMapView, context: Context) {
+    func updateUIView(_ view: UIView, context: Context) {
+        guard let map = context.coordinator.map else { return }
         context.coordinator.update(branches.map(\.path).filter { $0.count > 1 }, on: map)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator: NSObject, MLNMapViewDelegate {
+        weak var map: MLNMapView?
         private var source: MLNShapeSource?
         private var paths: [[Coordinate]] = []
         private var didFit = false

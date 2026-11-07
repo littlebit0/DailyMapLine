@@ -4,7 +4,9 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.PointF
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
@@ -20,7 +22,12 @@ import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.ln
 import kotlin.math.roundToInt
+import kotlin.math.tan
 
 /**
  * Covers everything, then clears a 100 m wide stroke along each branch (50 m per side).
@@ -30,7 +37,24 @@ import kotlin.math.roundToInt
 class FogOverlay(context: Context) : View(context) {
     var map: MapLibreMap? = null
     var paths: List<List<Coordinate>> = emptyList()
-        set(value) { field = value; invalidate() }
+        set(value) {
+            field = value
+            // Projected once; each frame only applies one matrix instead of asking the map per point.
+            origin = value.firstOrNull()?.firstOrNull()?.let(::mercator) ?: (0.0 to 0.0)
+            mercatorPaths = value.filter { it.size > 1 }.map { path ->
+                val line = android.graphics.Path()
+                path.forEachIndexed { i, c ->
+                    val (x, y) = local(mercator(c))
+                    if (i == 0) line.moveTo(x, y) else line.lineTo(x, y)
+                }
+                line to (100 / (40075016.686 * cos(Math.toRadians(path[0].lat))) * LOCAL_SCALE).toFloat()
+            }
+            invalidate()
+        }
+    private var origin = 0.0 to 0.0
+    private var mercatorPaths: List<Pair<android.graphics.Path, Float>> = emptyList()
+    private val screenPath = android.graphics.Path()
+    private val matrix = Matrix()
     var location: Location? = null
         set(value) { field = value; invalidate() }
 
@@ -50,19 +74,23 @@ class FogOverlay(context: Context) : View(context) {
     }
     private val blue = Color.rgb(36, 125, 221)
 
+    private fun local(m: Pair<Double, Double>) =
+        ((m.first - origin.first) * LOCAL_SCALE).toFloat() to ((m.second - origin.second) * LOCAL_SCALE).toFloat()
+
     override fun onDraw(canvas: Canvas) {
         val map = map ?: return
         val layer = canvas.saveLayer(null, null)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fog)
-        for (path in paths) {
-            if (path.size < 2) continue
-            clear.strokeWidth = (100 / map.projection.getMetersPerPixelAtLatitude(path[0].lat)).toFloat()
-            val line = android.graphics.Path()
-            path.forEachIndexed { i, c ->
-                val p = map.projection.toScreenLocation(LatLng(c.lat, c.lon))
-                if (i == 0) line.moveTo(p.x, p.y) else line.lineTo(p.x, p.y)
-            }
-            canvas.drawPath(line, clear)
+        val (ax, ay) = local(mercator(map.projection.fromScreenLocation(PointF(0f, 0f)).let { Coordinate(it.longitude, it.latitude) }))
+        val (bx, by) = local(mercator(map.projection.fromScreenLocation(PointF(width.toFloat(), 0f)).let { Coordinate(it.longitude, it.latitude) }))
+        val scale = width / hypot(bx - ax, by - ay)
+        matrix.setTranslate(-ax, -ay)
+        matrix.postScale(scale, scale)
+        matrix.postRotate(-Math.toDegrees(atan2((by - ay).toDouble(), (bx - ax).toDouble())).toFloat())
+        for ((line, widthUnits) in mercatorPaths) {
+            line.transform(matrix, screenPath)
+            clear.strokeWidth = widthUnits * scale
+            canvas.drawPath(screenPath, clear)
         }
         canvas.restoreToCount(layer)
         drawLocation(canvas, map)
@@ -95,6 +123,15 @@ class FogOverlay(context: Context) : View(context) {
     }
 }
 
+/** Web Mercator in world units (0..1), the projection the map draws in, so screen = similarity transform. */
+private fun mercator(c: Coordinate): Pair<Double, Double> {
+    val lat = Math.toRadians(c.lat)
+    return (c.lon + 180) / 360 to (1 - ln(tan(lat) + 1 / cos(lat)) / Math.PI) / 2
+}
+
+/** Floats lose metres at world scale, so paths are stored relative to an origin and magnified. */
+private const val LOCAL_SCALE = 16_777_216.0
+
 /** The map screen: reveals visited areas and shows the current position. It never draws route lines. */
 @Composable
 fun VisitedMap(branches: List<Branch>, location: Location?, recenterRequest: Int, modifier: Modifier = Modifier) {
@@ -102,17 +139,26 @@ fun VisitedMap(branches: List<Branch>, location: Location?, recenterRequest: Int
         modifier = modifier,
         factory = { context ->
             val overlay = FogOverlay(context)
+            val container = FrameLayout(context)
             val mapView = makeBaseMap(context) { map ->
                 map.setStyle(Style.Builder().fromJson(MapStyle.json(context)))
                 overlay.map = map
                 map.addOnCameraMoveListener { overlay.invalidate() }
                 map.addOnCameraIdleListener { overlay.invalidate() }
             }
-            FrameLayout(context).apply {
+            container.apply {
                 addView(mapView)
                 addView(overlay)
                 tag = Holder(overlay, 0)
             }
+            // The zoom strip moves above the fog so its handle is not dimmed.
+            mapView.getMapAsync {
+                val strip = (0 until mapView.childCount).map(mapView::getChildAt).firstOrNull { it is ZoomStrip } ?: return@getMapAsync
+                val params = strip.layoutParams
+                mapView.removeView(strip)
+                container.addView(strip, params)
+            }
+            container
         },
         update = { view ->
             val holder = view.tag as Holder
