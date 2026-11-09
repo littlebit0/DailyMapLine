@@ -22,6 +22,8 @@ enum RecordingStatus {
 final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published private(set) var status = RecordingStatus.off
     @Published private(set) var branches: [Branch] = []
+    /// Road path from the last node to the current position, shown until the next node is saved. Never stored.
+    @Published private(set) var livePath: [Coordinate] = []
     @Published private(set) var dates: Set<String> = []
     @Published private(set) var hasUnconnected = false
     /// Only "Always" lets iOS relaunch the app for recording after it is fully closed.
@@ -48,6 +50,9 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private var policy = RecordingPolicy()
     private var lastFix: (location: CLLocation, time: Date)?
+    /// Keeps background updates alive while recording.
+    private var backgroundSession: CLBackgroundActivitySession?
+    private static let wakeRegion = "wake"
 
     override init() {
         enabled = UserDefaults.standard.bool(forKey: Keys.enabled)
@@ -136,6 +141,7 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
             manager.showsBackgroundLocationIndicator = true
             manager.startUpdatingLocation()
             manager.startMonitoringSignificantLocationChanges()
+            if backgroundSession == nil { backgroundSession = CLBackgroundActivitySession() }
             if status != .stopped { status = .moving }
         default:
             status = .denied
@@ -145,6 +151,9 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     private func stop() {
         manager.stopUpdatingLocation()
         manager.stopMonitoringSignificantLocationChanges()
+        manager.monitoredRegions.forEach(manager.stopMonitoring)
+        backgroundSession?.invalidate()
+        backgroundSession = nil
         UserDefaults.standard.set(true, forKey: Keys.pendingGap)
         policy = RecordingPolicy()
         lastFix = nil
@@ -177,6 +186,7 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         let silent = lastFix.map { location.timestamp.timeIntervalSince($0.time) >= Self.gapSeconds } ?? false
         if silent { UserDefaults.standard.set(true, forKey: Keys.pendingGap) }
         lastFix = (location, location.timestamp)
+        armWakeRegion(around: location)
         let fix = Coordinate(lon: location.coordinate.longitude, lat: location.coordinate.latitude)
         if router?.hasNoRoad(near: fix) == true {
             // Off-road positions are not stored, so the next node must not connect across them.
@@ -186,15 +196,39 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
         let record = policy.shouldRecord(fix, speedKmh: speed, at: location.timestamp)
         status = policy.isStopped ? .stopped : .moving
+        updateLivePath(to: fix, speedKmh: speed)
         guard record, let store else { return }
         do {
             let afterGap = UserDefaults.standard.bool(forKey: Keys.pendingGap)
             try store.record(fix, date: Self.localDate(location.timestamp), router: router, speedKmh: speed, afterGap: afterGap)
             UserDefaults.standard.set(false, forKey: Keys.pendingGap)
+            livePath = []
             reload()
         } catch {
             errorMessage = "위치를 저장하지 못했어요. \(error)"
         }
+    }
+
+    /// After the app is swiped away, leaving this circle relaunches it within about 100 m,
+    /// much sooner than significant-change monitoring (about 500 m). Needs "Always" permission.
+    private func armWakeRegion(around location: CLLocation) {
+        let current = manager.monitoredRegions.first { $0.identifier == Self.wakeRegion } as? CLCircularRegion
+        if let current, current.contains(location.coordinate),
+           CLLocation(latitude: current.center.latitude, longitude: current.center.longitude).distance(from: location) < 50 { return }
+        let region = CLCircularRegion(center: location.coordinate, radius: 100, identifier: Self.wakeRegion)
+        region.notifyOnEntry = false
+        manager.startMonitoring(for: region)
+    }
+
+    /// Follows the same road-only rule as branches, and never bridges a gap the next node will not connect.
+    private func updateLivePath(to fix: Coordinate, speedKmh: Double) {
+        guard !UserDefaults.standard.bool(forKey: Keys.pendingGap), let last = try? store?.lastNode(), let router else {
+            livePath = []
+            return
+        }
+        // Routing every fix is wasted work when the position barely moved.
+        if let end = livePath.last, distanceMeters(end, fix) < 10 { return }
+        if case .road(let path) = router.route(from: last.coordinate, to: fix, speedKmh: speedKmh) { livePath = path }
     }
 
     /// Returns false when nothing was deleted; existing records stay intact in that case.

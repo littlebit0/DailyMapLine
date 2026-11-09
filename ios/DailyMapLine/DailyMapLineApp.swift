@@ -6,10 +6,21 @@ import UniformTypeIdentifiers
 
 @main
 struct DailyMapLineApp: App {
-    @StateObject private var model = AppModel()
+    @UIApplicationDelegateAdaptor private var delegate: AppDelegate
 
     var body: some Scene {
-        WindowGroup { MapScreen().environmentObject(model) }
+        WindowGroup { MapScreen().environmentObject(delegate.model) }
+    }
+}
+
+/// iOS relaunches a closed app in the background for location events without creating any scene,
+/// so the model is created at launch here instead of by the first view.
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    @MainActor lazy var model = AppModel()
+
+    @MainActor func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        _ = model
+        return true
     }
 }
 
@@ -17,14 +28,22 @@ struct MapScreen: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage("didShowIntro") private var didShowIntro = false
     @State private var recenterRequest = 0
+    @State private var northRequest = 0
     @State private var wantsRecenter = false
 
     var body: some View {
         NavigationStack {
-            VisitedMap(branches: model.branches, showsUserLocation: model.locationAllowed, recenterRequest: recenterRequest)
+            VisitedMap(branches: model.branches, livePath: model.livePath, showsUserLocation: model.locationAllowed, recenterRequest: recenterRequest, northRequest: northRequest)
                 .ignoresSafeArea(edges: .bottom)
                 .overlay(alignment: .bottomLeading) { Attribution() }
                 .overlay(alignment: .bottomTrailing) {
+                    VStack(spacing: 12) {
+                    Button { northRequest += 1 } label: {
+                        Image(systemName: "location.north.line.fill")
+                            .frame(width: 48, height: 48)
+                            .background(.regularMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("지도 북쪽 위로")
                     Button {
                         if model.locationAllowed {
                             recenterRequest += 1
@@ -38,6 +57,7 @@ struct MapScreen: View {
                             .background(.regularMaterial, in: Circle())
                     }
                     .accessibilityLabel("현위치")
+                    }
                     .padding(16)
                 }
                 .onChange(of: model.locationAllowed) { _, allowed in

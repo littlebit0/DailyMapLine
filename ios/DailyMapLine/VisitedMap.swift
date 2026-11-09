@@ -84,8 +84,8 @@ final class FogOverlay: UIView {
     }
 
     private func drawSpeed(_ location: CLLocation, below point: CGPoint) {
-        // A negative speed means iOS has no valid reading, which is not the same as standing still.
-        let text = location.speed >= 0 ? "\(Int((location.speed * 3.6).rounded())) km/h" : "-- km/h"
+        // No valid reading is shown as 0 too (user decision).
+        let text = "\(Int((max(location.speed, 0) * 3.6).rounded())) km/h"
         accessibilityLabel = "현재 속도 \(text)"
         let label = NSAttributedString(string: text, attributes: [
             .font: UIFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold),
@@ -110,12 +110,16 @@ final class FogOverlay: UIView {
 /// The map screen: reveals visited areas and shows the current position. It never draws route lines.
 struct VisitedMap: UIViewRepresentable {
     var branches: [Branch]
+    var livePath: [Coordinate]
     var showsUserLocation: Bool
     var recenterRequest: Int
+    var northRequest: Int
 
     func makeUIView(context: Context) -> UIView {
         let container = UIView()
         let map = makeBaseMap(delegate: context.coordinator)
+        // Starts at the last known position instead of the style's default city.
+        if let last = CLLocationManager().location?.coordinate { map.setCenter(last, animated: false) }
         container.addSubview(map)
         context.coordinator.map = map
         let overlay = FogOverlay()
@@ -128,8 +132,11 @@ struct VisitedMap: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UIView, context: Context) {
-        context.coordinator.overlay?.paths = branches.map(\.path).filter { $0.count > 1 }
+        let paths = (branches.map(\.path) + [livePath]).filter { $0.count > 1 }
+        // Rebuilding the projected paths is skipped when nothing changed.
+        if context.coordinator.overlay?.paths != paths { context.coordinator.overlay?.paths = paths }
         context.coordinator.updateUserLocation(showsUserLocation, recenterRequest: recenterRequest)
+        context.coordinator.faceNorth(northRequest)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -138,6 +145,15 @@ struct VisitedMap: UIViewRepresentable {
         weak var map: MLNMapView?
         weak var overlay: FogOverlay?
         private var handledRecenter = 0
+        private var handledNorth = 0
+        private var centeredOnLaunch = false
+
+        func faceNorth(_ request: Int) {
+            guard let map, request != handledNorth else { return }
+            handledNorth = request
+            if map.userTrackingMode == .followWithHeading { map.userTrackingMode = .follow }
+            map.setDirection(0, animated: true)
+        }
 
         func updateUserLocation(_ shows: Bool, recenterRequest: Int) {
             guard let map else { return }
@@ -154,7 +170,13 @@ struct VisitedMap: UIViewRepresentable {
             annotation is MLNUserLocation ? MLNUserLocationAnnotationView() : nil
         }
 
-        func mapView(_ mapView: MLNMapView, didUpdate userLocation: MLNUserLocation?) { overlay?.setNeedsDisplay() }
+        func mapView(_ mapView: MLNMapView, didUpdate userLocation: MLNUserLocation?) {
+            if !centeredOnLaunch, userLocation?.location != nil {
+                centeredOnLaunch = true
+                mapView.setUserTrackingMode(.follow, animated: true, completionHandler: nil)
+            }
+            overlay?.setNeedsDisplay()
+        }
 
         func mapViewRegionIsChanging(_ mapView: MLNMapView) { overlay?.setNeedsDisplay() }
 
