@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,8 +68,9 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun Root(app: DailyMapLineApp) {
-    var screen by remember { mutableStateOf(Screen.Map) }
-    var showIntro by remember { mutableStateOf(!app.didShowIntro) }
+    // Saveable: Android may kill the process while a picker is open, and the result must return to the same screen.
+    var screen by rememberSaveable { mutableStateOf(Screen.Map) }
+    var showIntro by rememberSaveable { mutableStateOf(!app.didShowIntro) }
     val error by app.errorMessage.collectAsState()
     BackHandler(screen != Screen.Map) { screen = Screen.Map }
     Surface(Modifier.fillMaxSize().systemBarsPadding()) {
