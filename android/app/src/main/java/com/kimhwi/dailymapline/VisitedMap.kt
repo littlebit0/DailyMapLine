@@ -176,7 +176,7 @@ private const val LOCAL_SCALE = 16_777_216.0
 
 /** The map screen: reveals visited areas and shows the current position. It never draws route lines. */
 @Composable
-fun VisitedMap(branches: List<Branch>, location: Location?, recenterRequest: Int, modifier: Modifier = Modifier) {
+fun VisitedMap(branches: List<Branch>, livePath: List<Coordinate>, location: Location?, recenterRequest: Int, modifier: Modifier = Modifier) {
     AndroidView(
         modifier = modifier,
         factory = { context ->
@@ -204,7 +204,9 @@ fun VisitedMap(branches: List<Branch>, location: Location?, recenterRequest: Int
         },
         update = { view ->
             val holder = view.tag as Holder
-            holder.overlay.paths = branches.map { it.path }.filter { it.size > 1 }
+            val paths = (branches.map { it.path } + listOf(livePath)).filter { it.size > 1 }
+            // Rebuilding the projected paths is skipped when nothing changed.
+            if (holder.overlay.paths != paths) holder.overlay.paths = paths
             holder.overlay.location = location
             if (recenterRequest != holder.handledRecenter && location != null) {
                 holder.handledRecenter = recenterRequest

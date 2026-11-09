@@ -137,6 +137,7 @@ private fun IntroDialog(app: DailyMapLineApp, onDone: () -> Unit) {
 private fun MapScreen(app: DailyMapLineApp, onVideo: () -> Unit, onSettings: () -> Unit) {
     val activity = LocalContext.current as MainActivity
     val branches by app.branches.collectAsState()
+    val livePath by app.livePath.collectAsState()
     val status by app.status.collectAsState()
     val location by app.currentLocation.collectAsState()
     val ready by app.dataReady.collectAsState()
@@ -159,7 +160,7 @@ private fun MapScreen(app: DailyMapLineApp, onVideo: () -> Unit, onSettings: () 
         }
         Text(if (ready) status.text else "지도와 길 데이터를 준비하고 있어요.", Modifier.padding(horizontal = 12.dp, vertical = 4.dp), fontSize = 14.sp)
         Box(Modifier.fillMaxSize()) {
-            if (ready) VisitedMap(branches, location, recenter, Modifier.fillMaxSize())
+            if (ready) VisitedMap(branches, livePath, location, recenter, Modifier.fillMaxSize())
             Text(
                 "Protomaps © OpenStreetMap",
                 Modifier.align(Alignment.BottomStart).padding(8.dp).background(Color.White.copy(alpha = 0.9f)).padding(4.dp),

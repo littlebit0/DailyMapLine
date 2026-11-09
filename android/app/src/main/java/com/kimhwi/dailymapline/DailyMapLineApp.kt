@@ -5,6 +5,7 @@ import android.content.Context
 import com.kimhwi.dailymapline.core.Branch
 import com.kimhwi.dailymapline.core.Coordinate
 import com.kimhwi.dailymapline.core.RecordingPolicy
+import com.kimhwi.dailymapline.core.distanceMeters
 import com.valhalla.valhalla.Valhalla
 import com.valhalla.valhalla.config.ValhallaConfigFactory
 import kotlinx.coroutines.CoroutineScope
@@ -33,6 +34,8 @@ class DailyMapLineApp : Application() {
     lateinit var store: RecordStore
     @Volatile var router: ValhallaRouter? = null
     val branches = MutableStateFlow<List<Branch>>(emptyList())
+    /** Road path from the last node to the current position, shown until the next node is saved. Never stored. */
+    val livePath = MutableStateFlow<List<Coordinate>>(emptyList())
     val dates = MutableStateFlow<Set<String>>(emptySet())
     val status = MutableStateFlow(RecordingStatus.Off)
     val dataReady = MutableStateFlow(false)
@@ -110,12 +113,24 @@ class DailyMapLineApp : Application() {
         }
         val record = policy.shouldRecord(fix, speed, location.time)
         status.value = if (policy.isStopped) RecordingStatus.Stopped else RecordingStatus.Moving
+        updateLivePath(fix, speed)
         if (!record) return
         runCatching {
             store.record(fix, localDate(Date(location.time)), router, speed, pendingGap)
             pendingGap = false
+            livePath.value = emptyList()
             reload()
         }.onFailure { errorMessage.value = "위치를 저장하지 못했어요. ${it.message}" }
+    }
+
+    /** Follows the same road-only rule as branches, and never bridges a gap the next node will not connect. */
+    private fun updateLivePath(fix: Coordinate, speedKmh: Double) {
+        val last = store.lastNode()
+        val router = router
+        if (pendingGap || last == null || router == null) { livePath.value = emptyList(); return }
+        // Routing every fix is wasted work when the position barely moved.
+        livePath.value.lastOrNull()?.let { if (distanceMeters(it, fix) < 10) return }
+        (router.route(last.coordinate, fix, speedKmh) as? com.kimhwi.dailymapline.core.RouteResult.Road)?.let { livePath.value = it.path }
     }
 
     fun deleteDay(date: String): Boolean = runCatching {
