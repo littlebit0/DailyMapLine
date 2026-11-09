@@ -10,6 +10,11 @@ import android.graphics.PointF
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
+import android.hardware.GeomagneticField
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Location
 import android.view.View
 import android.widget.FrameLayout
@@ -56,7 +61,42 @@ class FogOverlay(context: Context) : View(context) {
     private val screenPath = android.graphics.Path()
     private val matrix = Matrix()
     var location: Location? = null
-        set(value) { field = value; invalidate() }
+        set(value) {
+            // Direction of travel from the last fix, for when no compass reading is available.
+            val previous = field
+            if (previous != null && value != null && previous.distanceTo(value) >= 5) course = previous.bearingTo(value)
+            field = value
+            invalidate()
+        }
+    private var course: Float? = null
+    /** Compass heading toward true north, or null when the sensor is missing or unreliable. */
+    private var heading: Float? = null
+    private val sensors = context.getSystemService(SensorManager::class.java)
+    private val rotation = FloatArray(9)
+    private val orientation = FloatArray(3)
+    private val compass = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (event.accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE) { heading = null; return }
+            SensorManager.getRotationMatrixFromVector(rotation, event.values)
+            SensorManager.getOrientation(rotation, orientation)
+            val magnetic = Math.toDegrees(orientation[0].toDouble()).toFloat()
+            val declination = location?.let { GeomagneticField(it.latitude.toFloat(), it.longitude.toFloat(), it.altitude.toFloat(), it.time).declination } ?: 0f
+            heading = (magnetic + declination + 360) % 360
+            invalidate()
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        sensors?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)?.let { sensors.registerListener(compass, it, SensorManager.SENSOR_DELAY_UI) }
+    }
+
+    override fun onDetachedFromWindow() {
+        sensors?.unregisterListener(compass)
+        super.onDetachedFromWindow()
+    }
 
     private val fog = Paint().apply { color = Color.argb(171, 113, 134, 150) }
     private val clear = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -101,9 +141,11 @@ class FogOverlay(context: Context) : View(context) {
         val location = location ?: return
         val p = map.projection.toScreenLocation(LatLng(location.latitude, location.longitude))
         val density = resources.displayMetrics.density
-        if (location.hasBearing()) {
+        // Compass first, like iOS; the emulator and some phones report a bearing of 0 that is not real.
+        val direction = heading ?: course
+        if (direction != null) {
             // Compass degrees run clockwise from north; canvas angles run clockwise from east.
-            val center = location.bearing - map.cameraPosition.bearing.toFloat() - 90
+            val center = direction - map.cameraPosition.bearing.toFloat() - 90
             val radius = 36 * density
             fill.color = Color.argb(89, 36, 125, 221)
             canvas.drawArc(RectF(p.x - radius, p.y - radius, p.x + radius, p.y + radius), center - 36, 72f, true, fill)
